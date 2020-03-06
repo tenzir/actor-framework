@@ -345,14 +345,8 @@ connection_state instance::handle(execution_unit* ctx, connection_handle hdl,
         CAF_LOG_ERROR("no route to host after server handshake");
         return no_route_to_receiving_node;
       }
-      // Repeat client handshake with select_connection_flag to make sure the
-      // server uses this connection in its routing table.
-      write_client_handshake(ctx, callee_.get_buffer(path->hdl),
-                             header::select_connection_flag);
-      // Inform the callee.
       callee_.learned_new_node_directly(source_node, was_indirect);
       callee_.finalize_handshake(source_node, aid, sigs);
-      flush(*path);
       break;
     }
     case message_type::client_handshake: {
