@@ -121,6 +121,8 @@ std::string to_string(sec x) {
       return "no_tracing_context";
     case sec::all_requests_failed:
       return "all_requests_failed";
+    case sec::connection_timeout:
+      return "connection_timeout";
   };
 }
 
