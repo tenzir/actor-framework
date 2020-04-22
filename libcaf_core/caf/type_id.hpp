@@ -316,6 +316,6 @@ namespace caf::detail {
 
 static constexpr type_id_t io_module_begin = id_block::core_module::end;
 
-static constexpr type_id_t io_module_end = io_module_begin + 19;
+static constexpr type_id_t io_module_end = io_module_begin + 20;
 
 } // namespace caf::detail

@@ -26,6 +26,7 @@
 #include "caf/after.hpp"
 #include "caf/defaults.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
+#include "caf/detail/tick_time_point.hpp"
 #include "caf/event_based_actor.hpp"
 #include "caf/forwarding_actor_proxy.hpp"
 #include "caf/io/basp/all.hpp"
@@ -102,6 +103,7 @@ const char* basp_broker::name() const {
 
 behavior basp_broker::make_behavior() {
   CAF_LOG_TRACE(CAF_ARG(system().node()));
+  using detail::tick_time_point;
   set_down_handler([](local_actor* ptr, down_msg& x) {
     static_cast<basp_broker*>(ptr)->handle_down_msg(x);
   });
@@ -128,7 +130,7 @@ behavior basp_broker::make_behavior() {
     auto first_tick = now + heartbeat_interval;
     auto connection_timeout = get_or(config(), "middleman.connection-timeout",
                                      defaults::middleman::connection_timeout);
-    scheduled_send(this, first_tick, tick_atom_v, first_tick,
+    scheduled_send(this, first_tick, tick_atom_v, tick_time_point{first_tick},
                    heartbeat_interval, connection_timeout);
   }
   return behavior{
@@ -381,16 +383,16 @@ behavior basp_broker::make_behavior() {
       }
       return {x, std::move(addr), port};
     },
-    [=](tick_atom, actor_clock::time_point scheduled,
-        timespan heartbeat_interval, timespan connection_timeout) {
+    [=](tick_atom, tick_time_point scheduled, timespan heartbeat_interval,
+        timespan connection_timeout) {
       auto now = clock().now();
-      if (now < scheduled) {
+      if (now < scheduled.value) {
         CAF_LOG_WARNING("received tick before its time, reschedule");
-        scheduled_send(this, scheduled, tick_atom::value, scheduled,
+        scheduled_send(this, scheduled.value, tick_atom_v, scheduled,
                        heartbeat_interval, connection_timeout);
         return;
       }
-      auto next_tick = scheduled + heartbeat_interval;
+      auto next_tick = scheduled.value + heartbeat_interval;
       if (now >= next_tick) {
         CAF_LOG_ERROR("Lagging a full heartbeat interval behind! "
                       "Interval too low or BASP actor overloaded! "
@@ -398,7 +400,7 @@ behavior basp_broker::make_behavior() {
         while (now >= next_tick)
           next_tick += heartbeat_interval;
 
-      } else if (now >= scheduled + (heartbeat_interval / 2)) {
+      } else if (now >= scheduled.value + (heartbeat_interval / 2)) {
         CAF_LOG_WARNING("Lagging more than 50% of a heartbeat interval behind! "
                         "Interval too low or BASP actor overloaded!");
       }
@@ -419,7 +421,7 @@ behavior basp_broker::make_behavior() {
         }
       }
       // Schedule next tick.
-      scheduled_send(this, next_tick, tick_atom_v, next_tick,
+      scheduled_send(this, next_tick, tick_atom_v, tick_time_point{next_tick},
                      heartbeat_interval, connection_timeout);
     }};
 }

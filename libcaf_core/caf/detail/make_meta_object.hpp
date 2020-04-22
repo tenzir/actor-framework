@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstddef>
 
+#include "caf/allowed_unsafe_message_type.hpp"
 #include "caf/binary_deserializer.hpp"
 #include "caf/binary_serializer.hpp"
 #include "caf/byte.hpp"
@@ -80,18 +81,32 @@ namespace caf::detail {
 
 template <class T>
 meta_object make_meta_object(const char* type_name) {
-  return {
-    type_name,
-    padded_size_v<T>,
-    default_function::destroy<T>,
-    default_function::default_construct<T>,
-    default_function::copy_construct<T>,
-    default_function::save_binary<T>,
-    default_function::load_binary<T>,
-    default_function::save<T>,
-    default_function::load<T>,
-    default_function::stringify<T>,
-  };
+  if constexpr (is_allowed_unsafe_message_type_v<T>)
+    return {
+      type_name,
+      padded_size_v<T>,
+      default_function::destroy<T>,
+      default_function::default_construct<T>,
+      default_function::copy_construct<T>,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+      default_function::stringify<T>,
+    };
+  else
+    return {
+      type_name,
+      padded_size_v<T>,
+      default_function::destroy<T>,
+      default_function::default_construct<T>,
+      default_function::copy_construct<T>,
+      default_function::save_binary<T>,
+      default_function::load_binary<T>,
+      default_function::save<T>,
+      default_function::load<T>,
+      default_function::stringify<T>,
+    };
 }
 
 } // namespace caf::detail

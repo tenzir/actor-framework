@@ -37,6 +37,7 @@
 #include "caf/detail/ripemd_160.hpp"
 #include "caf/detail/safe_equal.hpp"
 #include "caf/detail/set_thread_name.hpp"
+#include "caf/detail/tick_time_point.hpp"
 #include "caf/event_based_actor.hpp"
 #include "caf/function_view.hpp"
 #include "caf/init_global_meta_objects.hpp"

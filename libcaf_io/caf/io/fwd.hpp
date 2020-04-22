@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "caf/allowed_unsafe_message_type.hpp"
+#include "caf/fwd.hpp"
 #include "caf/type_id.hpp"
 
 // Unfortunately required, because we cannot add a forward declaration for the
@@ -30,13 +31,7 @@
 // io::network::address_listing.
 #include "caf/io/network/protocol.hpp"
 
-namespace caf {
-
-// -- templates from the parent namespace necessary for defining aliases -------
-
-template <class> class intrusive_ptr;
-
-namespace io {
+namespace caf::io {
 
 // -- variadic templates -------------------------------------------------------
 
@@ -76,9 +71,11 @@ using scribe_ptr = intrusive_ptr<scribe>;
 using doorman_ptr = intrusive_ptr<doorman>;
 using datagram_servant_ptr = intrusive_ptr<datagram_servant>;
 
+} // namespace caf::io
+
 // -- nested namespaces --------------------------------------------------------
 
-namespace network {
+namespace caf::io::network {
 
 class default_multiplexer;
 class multiplexer;
@@ -86,13 +83,19 @@ class receive_buffer;
 
 using address_listing = std::map<protocol::network, std::vector<std::string>>;
 
-} // namespace network
+} // namespace caf::io::network
 
-} // namespace io
-} // namespace caf
+namespace caf::detail {
+
+struct tick_time_point;
+
+} // namespace caf::detail
+
+// -- type IDs -----------------------------------------------------------------
 
 CAF_BEGIN_TYPE_ID_BLOCK(io_module, detail::io_module_begin)
 
+  CAF_ADD_TYPE_ID(io_module, (caf::detail::tick_time_point))
   CAF_ADD_TYPE_ID(io_module, (caf::io::accept_handle))
   CAF_ADD_TYPE_ID(io_module, (caf::io::acceptor_closed_msg))
   CAF_ADD_TYPE_ID(io_module, (caf::io::acceptor_passivated_msg))
@@ -115,6 +118,7 @@ CAF_BEGIN_TYPE_ID_BLOCK(io_module, detail::io_module_begin)
 
 CAF_END_TYPE_ID_BLOCK(io_module)
 
+CAF_ALLOW_UNSAFE_MESSAGE_TYPE(caf::detail::tick_time_point)
 CAF_ALLOW_UNSAFE_MESSAGE_TYPE(caf::io::doorman_ptr)
 CAF_ALLOW_UNSAFE_MESSAGE_TYPE(caf::io::scribe_ptr)
 
