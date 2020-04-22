@@ -686,6 +686,7 @@ public:
     cfg.set("logger.inline-output", true);
     cfg.set("middleman.network-backend", "testing");
     cfg.set("middleman.manual-multiplexing", true);
+    cfg.set("middleman.heartbeat-interval", caf::timespan{0});
     cfg.set("middleman.workers", size_t{0});
     cfg.set("stream.credit-policy", "testing");
     return cfg;
