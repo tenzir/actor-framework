@@ -278,6 +278,7 @@ caf_add_test_suites(caf-core-test
   ipv6_address
   ipv6_endpoint
   ipv6_subnet
+  load_inspector
   local_group
   logger
   mailbox_element
@@ -300,6 +301,7 @@ caf_add_test_suites(caf-core-test
   policy.select_any
   request_timeout
   result
+  save_inspector
   selective_streaming
   serialization
   settings
