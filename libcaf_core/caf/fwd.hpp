@@ -190,7 +190,7 @@ using ip_address = ipv6_address;
 using ip_endpoint = ipv6_endpoint;
 using ip_subnet = ipv6_subnet;
 using settings = dictionary<config_value>;
-using stream_slot = uint16_t;
+using stream_slot = uint32_t;
 
 // -- functions ----------------------------------------------------------------
 
