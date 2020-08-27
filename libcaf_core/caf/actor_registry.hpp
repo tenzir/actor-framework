@@ -64,10 +64,10 @@ public:
   void erase(actor_id key);
 
   /// Increases running-actors-count by one.
-  void inc_running();
+  void inc_running(actor_id actor);
 
   /// Decreases running-actors-count by one.
-  void dec_running();
+  void dec_running(actor_id actor);
 
   /// Returns the number of currently running actors.
   size_t running() const;
