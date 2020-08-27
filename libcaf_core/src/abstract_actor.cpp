@@ -97,14 +97,14 @@ void abstract_actor::register_at_system() {
   if (getf(is_registered_flag))
     return;
   setf(is_registered_flag);
-  home_system().registry().inc_running();
+  home_system().registry().inc_running(id());
 }
 
 void abstract_actor::unregister_from_system() {
   if (!getf(is_registered_flag))
     return;
   unsetf(is_registered_flag);
-  home_system().registry().dec_running();
+  home_system().registry().dec_running(id());
 }
 
 } // namespace caf
