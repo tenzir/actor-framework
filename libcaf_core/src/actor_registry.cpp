@@ -35,7 +35,6 @@
 #include "caf/event_based_actor.hpp"
 #include "caf/uniform_type_info_map.hpp"
 
-#include "caf/detail/attributes.hpp"
 #include "caf/detail/shared_spinlock.hpp"
 
 namespace caf {
@@ -97,8 +96,10 @@ void actor_registry::erase(actor_id key) {
   }
 }
 
-void actor_registry::inc_running([[maybe_unused]] actor_id actor) {
-  [[maybe_unused]] auto value = ++running_;
+void actor_registry::inc_running(actor_id actor) {
+  CAF_IGNORE_UNUSED(actor);
+  auto value = ++running_;
+  CAF_IGNORE_UNUSED(value);
   CAF_LOG_DEBUG("inc running count from actor " << actor << " to " << value);
 }
 
@@ -106,7 +107,8 @@ size_t actor_registry::running() const {
   return running_.load();
 }
 
-void actor_registry::dec_running([[maybe_unused]] actor_id actor) {
+void actor_registry::dec_running(actor_id actor) {
+  CAF_IGNORE_UNUSED(actor);
   size_t new_val = --running_;
   if (new_val <= 1) {
     std::unique_lock<std::mutex> guard(running_mtx_);
