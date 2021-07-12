@@ -162,12 +162,12 @@ public:
     CAF_LOG_TRACE("");
     // instead of dropping "unexpected" messages,
     // we simply forward them to our acquaintances
-    auto fwd = [=](scheduled_actor*, message_view& x) -> result<message> {
+    auto fwd = [=, this](scheduled_actor*, message_view& x) -> result<message> {
       send_to_acquaintances(x.move_content_to_message());
       return message{};
     };
     set_default_handler(fwd);
-    set_down_handler([=](down_msg& dm) {
+    set_down_handler([=, this](down_msg& dm) {
       CAF_LOG_TRACE(CAF_ARG(dm));
       auto first = acquaintances_.begin();
       auto last = acquaintances_.end();
@@ -179,19 +179,19 @@ public:
     });
     // return behavior
     return {
-      [=](join_atom, const actor& other) {
+      [=, this](join_atom, const actor& other) {
         CAF_LOG_TRACE(CAF_ARG(other));
         if (acquaintances_.insert(other).second) {
           monitor(other);
         }
       },
-      [=](leave_atom, const actor& other) {
+      [=, this](leave_atom, const actor& other) {
         CAF_LOG_TRACE(CAF_ARG(other));
         acquaintances_.erase(other);
         if (acquaintances_.erase(other) > 0)
           demonitor(other);
       },
-      [=](forward_atom, const message& what) {
+      [=, this](forward_atom, const message& what) {
         CAF_LOG_TRACE(CAF_ARG(what));
         // local forwarding
         group_->send_all_subscribers(current_element_->sender, what, context());
@@ -314,7 +314,7 @@ behavior proxy_broker::make_behavior() {
   CAF_LOG_TRACE("");
   // instead of dropping "unexpected" messages,
   // we simply forward them to our acquaintances
-  auto fwd = [=](local_actor*, message_view& x) -> result<message> {
+  auto fwd = [=, this](local_actor*, message_view& x) -> result<message> {
     group_->send_all_subscribers(current_element_->sender,
                                  x.move_content_to_message(), context());
     return message{};

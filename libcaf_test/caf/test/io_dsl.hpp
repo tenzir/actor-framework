@@ -75,7 +75,7 @@ public:
     // nop
   }
 
-  test_node_fixture() : test_node_fixture([=] { this->run(); }) {
+  test_node_fixture() : test_node_fixture([this] { this->run(); }) {
     // nop
   }
 

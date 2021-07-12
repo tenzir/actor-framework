@@ -296,7 +296,7 @@ class expect_clause {
 public:
   explicit expect_clause(caf::scheduler::test_coordinator& sched)
     : sched_(sched), dest_(nullptr) {
-    peek_ = [=] {
+    peek_ = [=, this] {
       /// The extractor will call CAF_FAIL on a type mismatch, essentially
       /// performing a type check when ignoring the result.
       extract<Ts...>(dest_);
@@ -345,7 +345,7 @@ public:
     std::tuple<typename std::decay<Us>::type...> tmp{std::forward<Us>(xs)...};
     // auto tmp = std::make_tuple(std::forward<Us>(xs)...);
     // TODO: move tmp into lambda when switching to C++14
-    peek_ = [=] {
+    peek_ = [=, this] {
       using namespace caf::detail;
       elementwise_compare_inspector<decltype(tmp)> inspector{tmp};
       auto ys = extract<Ts...>(dest_);
@@ -498,7 +498,7 @@ class allow_clause {
 public:
   explicit allow_clause(caf::scheduler::test_coordinator& sched)
     : sched_(sched), dest_(nullptr) {
-    peek_ = [=] {
+    peek_ = [=, this] {
       if (dest_ != nullptr)
         return try_extract<Ts...>(dest_) != caf::none;
       return false;
@@ -539,7 +539,7 @@ public:
     //       for GCC 4.8.
     std::tuple<typename std::decay<Us>::type...> tmp{std::forward<Us>(xs)...};
     // TODO: move tmp into lambda when switching to C++14
-    peek_ = [=] {
+    peek_ = [=, this] {
       using namespace caf::detail;
       elementwise_compare_inspector<decltype(tmp)> inspector{tmp};
       auto ys = try_extract<Ts...>(dest_);
@@ -580,7 +580,7 @@ template <class... Ts>
 class disallow_clause {
 public:
   disallow_clause() {
-    check_ = [=] {
+    check_ = [=, this] {
       auto ptr = dest_->peek_at_next_mailbox_element();
       if (ptr == nullptr)
         return;
@@ -619,7 +619,7 @@ public:
     //       for GCC 4.8.
     std::tuple<typename std::decay<Us>::type...> tmp{std::forward<Us>(xs)...};
     // TODO: move tmp into lambda when switching to C++14
-    check_ = [=] {
+    check_ = [=, this] {
       auto ptr = dest_->peek_at_next_mailbox_element();
       if (ptr == nullptr)
         return;
@@ -816,13 +816,13 @@ public:
 
   /// Call `run()` when the next scheduled actor becomes ready.
   void run_after_next_ready_event() {
-    sched.after_next_enqueue([=] { run(); });
+    sched.after_next_enqueue([this] { run(); });
   }
 
   /// Call `run_until(predicate)` when the next scheduled actor becomes ready.
   template <class BoolPredicate>
   void run_until_after_next_ready_event(BoolPredicate predicate) {
-    sched.after_next_enqueue([=] { run_until(predicate); });
+    sched.after_next_enqueue([=, this] { run_until(predicate); });
   }
 
   /// Sends a request to `hdl`, then calls `run()`, and finally fetches and
