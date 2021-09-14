@@ -23,6 +23,8 @@
 #include "caf/no_stages.hpp"
 #include "caf/scheduled_actor.hpp"
 
+#include "caf/detail/tracepoint.hpp"
+
 namespace caf {
 
 inbound_path::stats_t::stats_t() : num_elements(0), processing_time(0) {
@@ -168,6 +170,8 @@ void inbound_path::emit_ack_batch(local_actor* self, int32_t queued_items,
                        << CAF_ARG2("max_downstream_capacity",
                                    out.max_capacity())
                        << CAF_ARG(assigned_credit));
+  VAST_TRACEPOINT(emit_ack_batch_credit, self->id(), slots.sender, slots.receiver, credit, assigned_credit, max_capacity);
+  VAST_TRACEPOINT(emit_ack_batch_stats, self->id(), stats.num_elements, stats.processing_time, x.max_throughput, x.items_per_batch);
   if (credit == 0 && up_to_date())
     return;
   CAF_LOG_DEBUG(CAF_ARG(assigned_credit) << CAF_ARG(max_capacity)
