@@ -22,13 +22,20 @@
 #include "caf/actor_system_config.hpp"
 #include "caf/config.hpp"
 #include "caf/inbound_path.hpp"
+#include "caf/detail/scope_guard.hpp"
 #include "caf/to_string.hpp"
 
 #include "caf/scheduler/abstract_coordinator.hpp"
 
 #include "caf/detail/default_invoke_result_visitor.hpp"
+#include "caf/detail/observatory.hpp"
 #include "caf/detail/private_thread.hpp"
 #include "caf/detail/sync_request_bouncer.hpp"
+
+#include <atomic>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 namespace caf {
 
@@ -373,10 +380,91 @@ scheduled_actor::mailbox_visitor::operator()(mailbox_element& x) {
   }
 }
 
+static observatory::ThreadAwareRecorder recorder_("/tmp/perf.data", 5000, observatory::CounterType::Cycles);
+// static const size_t max_activations_ = 32'768;
+static std::atomic<size_t> activations_ {0};
+static std::atomic<size_t> max_activations_ = {0};
+static const uint16_t PERF_CONTROL_PORT = 7788U;
+
+// TODO: Move this into `observatory.hpp` header.
+struct recording_control {
+  recording_control() {
+    if (!::getenv("VAST_PERF_REMOTE_CONTROL"))
+      return;
+    sockfd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    listen_addr_.sin_family = AF_INET;
+    listen_addr_.sin_port = htons(PERF_CONTROL_PORT);
+    listen_addr_.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ::bind(sockfd_, (struct sockaddr*)&listen_addr_, sizeof(listen_addr_));
+    control_thread_ = std::thread([this] {
+      ::listen(sockfd_, 10);
+      struct sockaddr_storage client_addr;
+      socklen_t len = sizeof(client_addr);
+      while (true) {
+        auto client = ::accept(sockfd_, (struct sockaddr*)&client_addr, &len);
+        if (client == -1 || abort_)
+          break;
+        std::string buf(64, '\0');
+        ::read(client, &buf[0], buf.size());
+        ::close(client);
+        int value = 0;
+        if (sscanf(buf.c_str(), "%d", &value) != 1) {
+          fprintf(stderr, "invalid input: %s", buf.c_str());
+          continue;
+        }
+        // Profile the next `value` scheduled actor activations.
+        max_activations_ = value;
+        activations_ = 0;
+      }
+    });
+  }
+
+  ~recording_control() {
+    abort_ = true;
+    if (sockfd_ != -1) {    
+      ::close(sockfd_);
+      // Poke the control socket in case since its most likely 
+      // stuck in `accept()`.
+      auto clientfd = ::socket(AF_INET, SOCK_STREAM, 0);
+      ::connect(clientfd, (struct sockaddr*)&listen_addr_, sizeof(listen_addr_));
+      ::close(clientfd);
+      control_thread_.join();
+    }
+  }
+
+private:
+  std::atomic<bool> abort_ = false;
+  int sockfd_ = -1;
+  struct sockaddr_in listen_addr_;
+  std::thread control_thread_;
+};
+
+static struct recording_control control_;
+
+
+
 resumable::resume_result scheduled_actor::resume(execution_unit* ctx,
                                                  size_t max_throughput) {
   CAF_PUSH_AID(id());
   CAF_LOG_TRACE(CAF_ARG(max_throughput));
+  auto aid = id();
+  auto name = std::string{this->name()};
+  const size_t INDEX_AID = 11;
+  bool enabled = false;
+  bool dump = false;
+  auto activations = ++activations_;
+  if (activations <= max_activations_) {
+    recorder_.enable();
+  }
+  auto guard = detail::make_scope_guard([aid, name, activations]{
+    if (activations <= max_activations_) {
+      recorder_.disable(name);
+      if (activations == max_activations_) {
+        fprintf(stderr, "dumping profile to %s\n", recorder_.filename().c_str());
+        recorder_.dump();
+      }
+    }
+  });
   if (!activate(ctx))
     return resumable::done;
   size_t handled_msgs = 0;
