@@ -144,9 +144,11 @@ inline std::string read_buildid(const char* file)
     std::ifstream ifs(file);
     char eident[16];
     ifs.read(eident, 16);
-    if (strncmp(eident, "\x7f""ELF", 4))
+    if (strncmp(eident, "\x7f""ELF", 4)) {
         // No need to throw here, just print an error and skip this
-        throw std::runtime_error("not an elf file");
+        fprintf(stderr, "not an elf file: %s", file);
+        return std::string(20, '0');
+    }
 
     if (eident[EI_CLASS] != ELFCLASS64)
         throw std::runtime_error("sorry, 32-bit elf not yet implemented ._.");
@@ -346,9 +348,6 @@ uint64_t pagealign_down(uint64_t addr)
 
 } // namespace internal
 
-// Ideally, `drain()` is called while the recorder is stopped,
-// otherwise data that is concurrently written might get missed.
-
 enum CounterType {
     Instructions = PERF_COUNT_HW_INSTRUCTIONS,
     Cycles = PERF_COUNT_HW_CPU_CYCLES,
@@ -365,9 +364,10 @@ public:
     void disable();
 
     // Write existing data from the perf buffer to the file `f`.
-    // BEWARE: This is buggy and unsafe as soon as you call it multiple times
-    // or the buffer may get bigger than 512KiB; prefer `siphon()` below.
-    // Only useful for stand-alone use.
+    // BEWARE - UNSAFE: This is buggy and unsafe as soon as you call it
+    // multiple times or the buffer may get bigger than 512KiB;
+    // prefer `siphon()` below.
+    // Only useful for specific debugging use.
     void drain(const char* f);
 
     // Will copy up to `maxlen` bytes from the perf buffer
@@ -472,7 +472,7 @@ BoundedRecorder::BoundedRecorder(size_t period, CounterType type)
         nullptr, mmap_size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
 
     if (mapping == MAP_FAILED) {
-        throw std::runtime_error("mmap");
+        throw std::runtime_error(std::string{"mmap: "} + strerror(errno));
     }
 
     base_ = static_cast<struct perf_event_mmap_page*>(mapping);
@@ -605,11 +605,11 @@ private:
     size_t period;
     CounterType type;
 
-    std::mutex recorders_mutex_; // guards insertion into `recorders`
-    std::mutex file_io_mutex_; // guards writes to the file
+    std::mutex recorders_mutex_; // guards insertion into `recorders_`
+    std::mutex queue_mutex_; // guards pushes to the `io_queue_`
     std::list<MemoryArea> io_queue_; // chunks to dump to file
 
-    std::map<pid_t, BoundedRecorder> recorders;
+    std::map<pid_t, BoundedRecorder> recorders_;
 };
 
 
@@ -630,15 +630,15 @@ inline void ThreadAwareRecorder::enable()
 {
     pid_t tid = internal::sys_gettid();
 
-    decltype(recorders.begin()) it;
+    decltype(recorders_.begin()) it;
     {
         std::lock_guard<std::mutex> lock(recorders_mutex_);
         // todo - Use `try_emplace()` to do this in a single operation,
         // once C++17 is wide-spread enough.
-        it = recorders.find(tid);
-        if (it == recorders.end()) {
-            recorders[tid];
-            it = recorders.find(tid);
+        it = recorders_.find(tid);
+        if (it == recorders_.end()) {
+            recorders_[tid];
+            it = recorders_.find(tid);
         }
     }
 
@@ -652,17 +652,17 @@ inline void ThreadAwareRecorder::disable(
     struct perf_event_header* prefix,
     struct perf_event_header* suffix)
 {
-    // FIXME - add synchronization
-    // FIXME - check if recorder exists
     pid_t tid = internal::sys_gettid();
 
-    //std::cout << "Disabling recorder for thread " << tid << std::endl;
-
-    decltype(recorders.begin()) it;
+    decltype(recorders_.begin()) it, end;
     {
         std::lock_guard<std::mutex> lock(recorders_mutex_);
-        it = recorders.find(tid);
+        it = recorders_.find(tid);
+        end = recorders_.end();
     }
+
+    if (it == end)
+        return;
 
     // fprintf(stderr, "%d", it == recorders.end());
     // assert: it != recorders.end()
@@ -694,7 +694,10 @@ inline void ThreadAwareRecorder::disable(
         area.used += suffix->size;
     }
 
-    io_queue_.push_back(std::move(area));
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        io_queue_.push_back(std::move(area));
+    }
 }
 
 inline void ThreadAwareRecorder::disable(const std::string& comm)
@@ -719,30 +722,37 @@ inline void ThreadAwareRecorder::disable(const std::string& comm)
 
 inline void ThreadAwareRecorder::dump()
 {
-    if (recorders.empty()) {
-        // throw std::runtime_error("cannot drain w/o recording");
-        fprintf(stderr, "cannot drain w/o recording\n");
-        return;
+    {
+        std::lock_guard<std::mutex> lock(recorders_mutex_);
+
+        if (recorders_.empty()) {
+            fprintf(stderr, "cannot drain w/o recording\n");
+            return;
+        }
+
+        for (auto& kv : recorders_) {
+            kv.second.disable();
+        }
     }
 
-    // Ideally the caller wouldn't leave any running,
-    // but it can't always be avoided, and the call is
-    // idempotent anyways.
-    for (auto& kv : recorders) {
-        kv.second.disable();
-    }
-
-    std::ofstream f(filename_);
 
     // NOTE - We use the same pea for all events, which seems
     // safe right now but will probably break at some point.
   
+    std::list<MemoryArea> areas;
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        areas.splice(areas.end(), io_queue_);
+    }
+
     std::list<Chunk> chunks;
-    for (const MemoryArea& area : io_queue_) {
+    for (const MemoryArea& area : areas) {
+        // TODO - use `list::splice()`?
         chunks.push_back(Chunk {area.data.get(), area.used});
     }
    
-    internal::write_perfdata(f, recorders.begin()->second.pea_, chunks);
+    std::ofstream f(filename_);
+    internal::write_perfdata(f, recorders_.begin()->second.pea_, chunks);
 }
 
 } // namespace observatory

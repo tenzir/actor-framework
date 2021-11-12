@@ -395,7 +395,8 @@ struct recording_control {
     listen_addr_.sin_family = AF_INET;
     listen_addr_.sin_port = htons(PERF_CONTROL_PORT);
     listen_addr_.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    ::bind(sockfd_, (struct sockaddr*)&listen_addr_, sizeof(listen_addr_));
+    int err = ::bind(sockfd_, (struct sockaddr*)&listen_addr_, sizeof(listen_addr_));
+    bound_ = err == 0;
     control_thread_ = std::thread([this] {
       ::listen(sockfd_, 10);
       struct sockaddr_storage client_addr;
@@ -421,8 +422,9 @@ struct recording_control {
 
   ~recording_control() {
     abort_ = true;
-    if (sockfd_ != -1) {    
+    if (sockfd_ != -1)
       ::close(sockfd_);
+    if (bound_) {
       // Poke the control socket in case since its most likely 
       // stuck in `accept()`.
       auto clientfd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -434,6 +436,7 @@ struct recording_control {
 
 private:
   std::atomic<bool> abort_ = false;
+  bool bound_ = false;
   int sockfd_ = -1;
   struct sockaddr_in listen_addr_;
   std::thread control_thread_;
