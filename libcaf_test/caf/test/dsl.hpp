@@ -226,13 +226,48 @@ private:
 
 // -- introspection of the next mailbox element --------------------------------
 
+template <class T, T... Ints>
+struct integer_sequence {
+  using value_type = T;
+  static constexpr std::size_t size() {
+    return sizeof...(Ints);
+  }
+};
+
+template <std::size_t... Ints>
+using index_sequence = integer_sequence<std::size_t, Ints...>;
+
+template <class T, std::size_t N, T... Is>
+struct make_integer_sequence : make_integer_sequence<T, N - 1, N - 1, Is...> {};
+
+template <class T, T... Is>
+struct make_integer_sequence<T, 0, Is...> : integer_sequence<T, Is...> {};
+
+template <std::size_t N>
+using make_index_sequence = make_integer_sequence<std::size_t, N>;
+
+template <class... T>
+using index_sequence_for = make_index_sequence<sizeof...(T)>;
+
+template <class... T, size_t... I>
+std::tuple<T...>
+clone_helper(const std::tuple<const T&...>& t, index_sequence<I...>) {
+  return std::make_tuple(std::get<I>(t)...);
+}
+
+template <class... T>
+std::tuple<T...> clone(const std::tuple<const T&...>& t) {
+  return clone_helper<T...>(t, index_sequence_for<T...>{});
+}
+
 /// @private
 template <class... Ts>
 caf::optional<std::tuple<Ts...>> default_extract(caf_handle x) {
   auto ptr = x->peek_at_next_mailbox_element();
   if (ptr == nullptr || !ptr->content().template match_elements<Ts...>())
     return caf::none;
-  return ptr->content().template get_as_tuple<Ts...>();
+  auto content = ptr->content().template get_as_tuple<Ts...>();
+  return clone(content);
 }
 
 /// @private
