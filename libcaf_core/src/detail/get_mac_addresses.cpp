@@ -87,7 +87,7 @@ std::vector<iface_info> get_mac_addresses() {
     }
     auto addr = oss.str();
     if (addr != "00:00:00:00:00:00") {
-      result.emplace_back(i->if_name, std::move(addr));
+      result.push_back({i->if_name, std::move(addr)});
     }
   }
   if_freenameindex(indices);
