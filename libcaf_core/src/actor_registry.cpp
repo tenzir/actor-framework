@@ -101,6 +101,8 @@ void actor_registry::inc_running(actor_id actor) {
   auto value = ++running_;
   CAF_IGNORE_UNUSED(value);
   CAF_LOG_DEBUG("inc running count from actor " << actor << " to " << value);
+  shared_guard guard(counters_mtx_);
+  ++counters_[actor];
 }
 
 size_t actor_registry::running() const {
@@ -115,6 +117,8 @@ void actor_registry::dec_running(actor_id actor) {
     running_cv_.notify_all();
   }
   CAF_LOG_DEBUG("dec running count from actor " << actor << " to " << new_val);
+  shared_guard guard(counters_mtx_);
+  --counters_[actor];
 }
 
 void actor_registry::await_running_count_equal(size_t expected) const {
@@ -167,6 +171,11 @@ auto actor_registry::actors() const -> entries {
   shared_guard guard(instances_mtx_);
   return entries_;
 }
+
+auto actor_registry::get_counters() const -> counters {
+  shared_guard guard(counters_mtx_);
+  return counters_;
+};
 
 void actor_registry::start() {
   // nop

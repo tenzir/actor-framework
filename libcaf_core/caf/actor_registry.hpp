@@ -100,6 +100,10 @@ public:
 
   entries actors() const;
 
+  using counters = std::unordered_map<actor_id, int64_t>;
+
+  counters get_counters() const;
+
 private:
   // Starts this component.
   void start();
@@ -124,6 +128,9 @@ private:
   std::atomic<size_t> running_;
   mutable std::mutex running_mtx_;
   mutable std::condition_variable running_cv_;
+
+  mutable detail::shared_spinlock counters_mtx_;
+  counters counters_;
 
   mutable detail::shared_spinlock instances_mtx_;
   entries entries_;
