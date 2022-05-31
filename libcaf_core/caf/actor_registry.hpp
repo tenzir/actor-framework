@@ -96,6 +96,10 @@ public:
 
   name_map named_actors() const;
 
+  using entries = std::unordered_map<actor_id, strong_actor_ptr>;
+
+  entries actors() const;
+
 private:
   // Starts this component.
   void start();
@@ -114,8 +118,6 @@ private:
 
   /// Associates given actor to `key`.
   void put_impl(atom_value key, strong_actor_ptr value);
-
-  using entries = std::unordered_map<actor_id, strong_actor_ptr>;
 
   actor_registry(actor_system& sys);
 

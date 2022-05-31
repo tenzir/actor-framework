@@ -163,6 +163,11 @@ auto actor_registry::named_actors() const -> name_map {
   return named_entries_;
 }
 
+auto actor_registry::actors() const -> entries {
+  shared_guard guard(instances_mtx_);
+  return entries_;
+}
+
 void actor_registry::start() {
   // nop
 }
