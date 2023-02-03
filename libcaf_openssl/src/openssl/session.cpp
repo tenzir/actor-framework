@@ -154,11 +154,12 @@ rw_state session::write_some(size_t& result, native_socket, const void* buf,
   return do_some(wr_fun, result, const_cast<void*>(buf), len, "write_some");
 }
 
-bool session::try_connect(native_socket fd) {
+bool session::try_connect(native_socket fd, const std::string& sni_servername) {
   CAF_LOG_TRACE(CAF_ARG(fd));
   CAF_BLOCK_SIGPIPE();
   SSL_set_fd(ssl_, fd);
   SSL_set_connect_state(ssl_);
+  SSL_set_tlsext_host_name(ssl_, sni_servername.c_str());
   auto ret = SSL_connect(ssl_);
   if (ret == 1)
     return true;
@@ -285,6 +286,7 @@ bool session::handle_ssl_result(int ret) {
 }
 
 session_ptr make_session(actor_system& sys, native_socket fd,
+                         const std::string& servername,
                          bool from_accepted_socket) {
   session_ptr ptr{new session(sys)};
   if (!ptr->init())
@@ -293,7 +295,7 @@ session_ptr make_session(actor_system& sys, native_socket fd,
     if (!ptr->try_accept(fd))
       return nullptr;
   } else {
-    if (!ptr->try_connect(fd))
+    if (!ptr->try_connect(fd, servername))
       return nullptr;
   }
   return ptr;
