@@ -160,10 +160,11 @@ bool session::try_connect(native_socket fd, const std::string& sni_servername) {
   SSL_set_fd(ssl_, fd);
   SSL_set_connect_state(ssl_);
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
+  // FIXME: Re-enable this.
   // Enable hostname validation.
-  SSL_set_hostflags(ssl_, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-  if (SSL_set1_host(ssl_, sni_servername.c_str()) != 1)
-    return false;
+  // SSL_set_hostflags(ssl_, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+  // if (SSL_set1_host(ssl_, sni_servername.c_str()) != 1)
+  //   return false;
 #endif
   // Send SNI when connecting.
   SSL_set_tlsext_host_name(ssl_, sni_servername.c_str());
