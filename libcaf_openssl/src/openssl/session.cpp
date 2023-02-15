@@ -4,6 +4,9 @@
 
 #include "caf/openssl/session.hpp"
 
+#include <optional>
+#include <openssl/decoder.h>
+
 CAF_PUSH_WARNINGS
 #include <openssl/err.h>
 CAF_POP_WARNINGS
@@ -54,6 +57,33 @@ int pem_passwd_cb(char* buf, int size, int, void* ptr) {
   strncpy(buf, passphrase, static_cast<size_t>(size));
   buf[size - 1] = '\0';
   return static_cast<int>(strlen(buf));
+}
+
+// If the input is a string like `env:SOME_VARIABLE` and the environment variable
+// `SOME_VARIABLE` exists, returns a string with the value of `SOME_VARIABLE`.
+// Otherwise, returns `std::nullopt`.
+std::optional<std::string> contents_from_indirect_envvar(const std::string& str) {
+  if (str.find("env:") != 0)
+    return std::nullopt;
+  auto var = str.substr(4);
+  auto const* contents = ::getenv(var.c_str());
+  if (contents == nullptr)
+    return std::nullopt;
+  return std::string{contents};
+}
+
+// If the input is a string like `env:SOME_VARIABLE` and the environment variable
+// `SOME_VARIABLE` exists, returns a string with the value of `SOME_VARIABLE`.
+std::optional<std::string> tmpfile_from_indirect_envvar(const std::string& str) {
+  auto contents = contents_from_indirect_envvar(str);
+  if (!contents)
+    return contents;  
+  auto filename = std::string{"/tmp/caf-openssl.XXXXXX"};
+  ::mkstemp(&filename[0]);
+  std::ofstream ofs(filename);
+  ofs << *contents;
+  ofs.close();
+  return filename;
 }
 
 } // namespace
@@ -207,15 +237,46 @@ SSL_CTX* session::create_ssl_context() {
   if (sys_.openssl_manager().authentication_enabled()) {
     // Require valid certificates on both sides.
     auto& cfg = sys_.config();
-    if (!cfg.openssl_certificate.empty()
+    // OpenSSL doesn't expose an API to read a certificate chain PEM from
+    // memory (as far as I can tell, there might be something in OSSL_DECODER)
+    // and the implementation of `SSL_CTX_use_certificate_chain_file`
+    // is huge, so we just write into a temporary file.
+    if (auto filename = tmpfile_from_indirect_envvar(cfg.openssl_certificate)) {
+      if (SSL_CTX_use_certificate_chain_file(ctx, filename->c_str())
+             != 1)
+        CAF_RAISE_ERROR("cannot load certificate from environt variable");
+    } else if (!cfg.openssl_certificate.empty()
         && SSL_CTX_use_certificate_chain_file(ctx,
                                               cfg.openssl_certificate.c_str())
-             != 1)
+             != 1) {
       CAF_RAISE_ERROR("cannot load certificate");
+    }
     if (!cfg.openssl_passphrase.empty()) {
       openssl_passphrase_ = cfg.openssl_passphrase;
       SSL_CTX_set_default_passwd_cb(ctx, pem_passwd_cb);
       SSL_CTX_set_default_passwd_cb_userdata(ctx, this);
+    }
+    if (auto var = contents_from_indirect_envvar(cfg.openssl_key)) {
+      EVP_PKEY *pkey = nullptr;
+      const char *format = "PEM";   // NULL for any format
+      const char *structure = nullptr; // Any structure
+      const char *keytype = nullptr;  // Any key
+      auto const* datap = reinterpret_cast<const unsigned char*>(var->data());
+      auto len = var->size();
+      int selection = 0; // Autodetect selection.
+      // TODO: We might as well read `openssl_passphrase` here and pass it
+      // to the decoder.
+      auto* dctx = OSSL_DECODER_CTX_new_for_pkey(&pkey, format, structure,
+                                     keytype,
+                                     selection,
+                                     nullptr, nullptr);
+      if (dctx == nullptr)
+        CAF_RAISE_ERROR("couldn't create openssl decoder context");
+      if (OSSL_DECODER_from_data(dctx, &datap, &len) != 0)
+        CAF_RAISE_ERROR("failed to decode private key");
+      // Use the private key.
+      SSL_CTX_use_PrivateKey(ctx, pkey);
+      OSSL_DECODER_CTX_free(dctx);
     }
     if (!cfg.openssl_key.empty()
         && SSL_CTX_use_PrivateKey_file(ctx, cfg.openssl_key.c_str(),
@@ -226,6 +287,9 @@ SSL_CTX* session::create_ssl_context() {
                                                : nullptr);
     auto capath = (!cfg.openssl_capath.empty() ? cfg.openssl_capath.c_str()
                                                : nullptr);
+    auto tmpfile = tmpfile_from_indirect_envvar(cafile);
+    if (tmpfile)
+      cafile = tmpfile->c_str();
     if (cafile || capath) {
       if (SSL_CTX_load_verify_locations(ctx, cafile, capath) != 1)
         CAF_RAISE_ERROR("cannot load trusted CA certificates");
