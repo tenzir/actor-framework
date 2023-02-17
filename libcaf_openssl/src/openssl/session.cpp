@@ -59,6 +59,10 @@ int pem_passwd_cb(char* buf, int size, int, void* ptr) {
   return static_cast<int>(strlen(buf));
 }
 
+std::optional<std::string> contents_from_direct_envvar(const std::string& str) {
+  return str;
+}
+
 // If the input is a string like `env:SOME_VARIABLE` and the environment variable
 // `SOME_VARIABLE` exists, returns a string with the value of `SOME_VARIABLE`.
 // Otherwise, returns `std::nullopt`.
@@ -74,17 +78,34 @@ std::optional<std::string> contents_from_indirect_envvar(const std::string& str)
 
 // If the input is a string like `env:SOME_VARIABLE` and the environment variable
 // `SOME_VARIABLE` exists, returns a string with the value of `SOME_VARIABLE`.
-std::optional<std::string> tmpfile_from_indirect_envvar(const std::string& str) {
-  auto contents = contents_from_indirect_envvar(str);
-  if (!contents)
-    return contents;  
+std::optional<std::string> tmpfile_from_string(const std::string& content) {
   auto filename = std::string{"/tmp/caf-openssl.XXXXXX"};
   ::mkstemp(&filename[0]);
   std::ofstream ofs(filename);
-  ofs << *contents;
+  ofs << content;
   ofs.close();
   return filename;
 }
+
+// Returns 
+std::optional<std::string> pem_string_from_envvar(const std::string& str) {
+  if (str.find("env:") == 0)
+    return contents_from_indirect_envvar(str);
+  // The PEM format isn't very strictly defined, some implementations
+  // write the header as `---- BEGIN`. However, we probably don't want to
+  // keep supporting this in the long run anyways, so we're fine with just
+  // detecting exactly those certificates that we create ourselves.
+  if (str.find("-----BEGIN") == 0)
+    return contents_from_direct_envvar(str);
+  return std::nullopt;
+}
+
+std::optional<std::string> pem_file_from_envvar(const std::string& str) {
+  if (auto contents = pem_string_from_envvar(str))
+    return tmpfile_from_string(*contents);
+  return std::nullopt;
+}
+
 
 } // namespace
 
@@ -238,10 +259,9 @@ SSL_CTX* session::create_ssl_context() {
     // Require valid certificates on both sides.
     auto& cfg = sys_.config();
     // OpenSSL doesn't expose an API to read a certificate chain PEM from
-    // memory (as far as I can tell, there might be something in OSSL_DECODER)
-    // and the implementation of `SSL_CTX_use_certificate_chain_file`
-    // is huge, so we just write into a temporary file.
-    if (auto filename = tmpfile_from_indirect_envvar(cfg.openssl_certificate)) {
+    // memory and the implementation of `SSL_CTX_use_certificate_chain_file`
+    // is huge, so we write into a temporary file.
+    if (auto filename = pem_file_from_envvar(cfg.openssl_certificate)) {
       if (SSL_CTX_use_certificate_chain_file(ctx, filename->c_str())
              != 1)
         CAF_RAISE_ERROR("cannot load certificate from environt variable");
@@ -256,7 +276,21 @@ SSL_CTX* session::create_ssl_context() {
       SSL_CTX_set_default_passwd_cb(ctx, pem_passwd_cb);
       SSL_CTX_set_default_passwd_cb_userdata(ctx, this);
     }
-    if (auto var = contents_from_indirect_envvar(cfg.openssl_key)) {
+    if (auto var = pem_string_from_envvar(cfg.openssl_key)) {
+#if OPENSSL_VERSION_NUMBER < 0x10101000L
+      // BIO_new_mem_buf just creates a read-only view, so we don't need
+      // to free it afterwards.
+      kbio = BIO_new_mem_buf(var->data(), -1);
+      if (!kbio)
+        CAF_RAISE_ERROR("");
+      // This function was deprecated in favor of the OSSL_DECODER API
+      // introduced in OpenSSL 3.0, but that is not available on
+      // Debian Bullseye.
+      rsa = PEM_read_bio_RSAPrivateKey(kbio, NULL, 0, NULL);
+      if (rsa != NULL)
+        CAF_RAISE_CAF_RAISE_ERROR("invalid private key");
+      SSL_CTX_use_RSAPrivateKey(ctx, rsa);
+#else /* OPENSSL_VERSION_NUMBER < 0x10101000L */
       EVP_PKEY *pkey = nullptr;
       const char *format = "PEM";   // NULL for any format
       const char *structure = nullptr; // Any structure
@@ -272,13 +306,14 @@ SSL_CTX* session::create_ssl_context() {
                                      nullptr, nullptr);
       if (dctx == nullptr)
         CAF_RAISE_ERROR("couldn't create openssl decoder context");
-      if (OSSL_DECODER_from_data(dctx, &datap, &len) != 0)
+      if (OSSL_DECODER_from_data(dctx, &datap, &len) != 1)
         CAF_RAISE_ERROR("failed to decode private key");
       // Use the private key.
       SSL_CTX_use_PrivateKey(ctx, pkey);
       OSSL_DECODER_CTX_free(dctx);
+#endif /* OPENSSL_VERSION_NUMBER < 0x10101000L */
     }
-    if (!cfg.openssl_key.empty()
+    else if (!cfg.openssl_key.empty()
         && SSL_CTX_use_PrivateKey_file(ctx, cfg.openssl_key.c_str(),
                                        SSL_FILETYPE_PEM)
              != 1)
@@ -287,7 +322,7 @@ SSL_CTX* session::create_ssl_context() {
                                                : nullptr);
     auto capath = (!cfg.openssl_capath.empty() ? cfg.openssl_capath.c_str()
                                                : nullptr);
-    auto tmpfile = tmpfile_from_indirect_envvar(cafile);
+    auto tmpfile = pem_file_from_envvar(cafile);
     if (tmpfile)
       cafile = tmpfile->c_str();
     if (cafile || capath) {
