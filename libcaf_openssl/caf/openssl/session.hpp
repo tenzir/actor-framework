@@ -61,6 +61,7 @@ private:
   std::string openssl_passphrase_;
   bool connecting_;
   bool accepting_;
+  bool hostname_validation_;
 };
 
 /// @relates session

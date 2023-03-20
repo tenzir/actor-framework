@@ -8,6 +8,7 @@
 
 CAF_PUSH_WARNINGS
 #include <openssl/err.h>
+#include <openssl/x509v3.h>
 CAF_POP_WARNINGS
 
 #include "caf/actor_system_config.hpp"
@@ -78,7 +79,10 @@ std::optional<std::string> contents_from_indirect_envvar(const std::string& str)
 // If the input is a string like `env:SOME_VARIABLE` and the environment variable
 // `SOME_VARIABLE` exists, returns a string with the value of `SOME_VARIABLE`.
 std::optional<std::string> tmpfile_from_string(const std::string& content) {
-  auto filename = std::string{"/tmp/caf-openssl.XXXXXX"};
+  const char* base = ::getenv("TMPDIR");
+  if (!base)
+    base = "/tmp";
+  auto filename = base + std::string{"/caf-openssl.XXXXXX"};
   ::mkstemp(&filename[0]);
   std::ofstream ofs(filename);
   ofs << content;
@@ -86,8 +90,9 @@ std::optional<std::string> tmpfile_from_string(const std::string& content) {
   return filename;
 }
 
-// Returns 
-std::optional<std::string> pem_string_from_envvar(const std::string& str) {
+// Returns a string in PEM format, ie. base64-encoded data surrounded
+// by `-----BEGIN XXX` and `-----END XXX` blocks.
+std::optional<std::string> pem_from_envvar(const std::string& str) {
   if (str.find("env:") == 0)
     return contents_from_indirect_envvar(str);
   // The PEM format isn't very strictly defined, some implementations
@@ -100,7 +105,7 @@ std::optional<std::string> pem_string_from_envvar(const std::string& str) {
 }
 
 std::optional<std::string> pem_file_from_envvar(const std::string& str) {
-  if (auto contents = pem_string_from_envvar(str))
+  if (auto contents = pem_from_envvar(str))
     return tmpfile_from_string(*contents);
   return std::nullopt;
 }
@@ -210,14 +215,16 @@ bool session::try_connect(native_socket fd, const std::string& sni_servername) {
   SSL_set_fd(ssl_, fd);
   SSL_set_connect_state(ssl_);
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  // FIXME: Re-enable this.
   // Enable hostname validation.
-  // SSL_set_hostflags(ssl_, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-  // if (SSL_set1_host(ssl_, sni_servername.c_str()) != 1)
-  //   return false;
+  if (hostname_validation_) {
+    SSL_set_hostflags(ssl_, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+    if (SSL_set1_host(ssl_, sni_servername.c_str()) != 1)
+      return false;
+  }
 #endif
   // Send SNI when connecting.
-  SSL_set_tlsext_host_name(ssl_, sni_servername.c_str());
+  if (SSL_set_tlsext_host_name(ssl_, sni_servername.c_str()) != 1)
+    return false;
   auto ret = SSL_connect(ssl_);
   if (ret == 1)
     return true;
@@ -257,9 +264,10 @@ SSL_CTX* session::create_ssl_context() {
   if (sys_.openssl_manager().authentication_enabled()) {
     // Require valid certificates on both sides.
     auto& cfg = sys_.config();
+    enable_hostname_validation_ = cfg.enable_hostname_validation;
     // OpenSSL doesn't expose an API to read a certificate chain PEM from
     // memory and the implementation of `SSL_CTX_use_certificate_chain_file`
-    // is huge, so we write into a temporary file.
+    // is huge, so instead of reproducing that we write into a temporary file.
     if (auto filename = pem_file_from_envvar(cfg.openssl_certificate)) {
       if (SSL_CTX_use_certificate_chain_file(ctx, filename->c_str())
              != 1)
@@ -275,7 +283,7 @@ SSL_CTX* session::create_ssl_context() {
       SSL_CTX_set_default_passwd_cb(ctx, pem_passwd_cb);
       SSL_CTX_set_default_passwd_cb_userdata(ctx, this);
     }
-    if (auto var = pem_string_from_envvar(cfg.openssl_key)) {
+    if (auto var = pem_from_envvar(cfg.openssl_key)) {
       // BIO_new_mem_buf just creates a read-only view, so we don't need
       // to free it afterwards.
       auto* kbio = BIO_new_mem_buf(var->data(), -1);
