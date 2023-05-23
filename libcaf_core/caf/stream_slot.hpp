@@ -13,7 +13,7 @@ namespace caf {
 
 /// Identifies a single stream path in the same way a TCP port identifies a
 /// connection over IP.
-using stream_slot = uint16_t;
+using stream_slot = uint32_t;
 
 /// Identifies an invalid slot.
 constexpr stream_slot invalid_stream_slot = 0;
