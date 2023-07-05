@@ -94,6 +94,8 @@ public:
     // nop
   }
 
+  error(uint8_t code, type_id_t category, message context);
+
   template <class E>
   error& operator=(E error_value) {
     error tmp{error_value};
@@ -179,8 +181,6 @@ private:
   // -- constructors, destructors, and assignment operators --------------------
 
   error(uint8_t code, type_id_t category);
-
-  error(uint8_t code, type_id_t category, message context);
 
   // -- member variables -------------------------------------------------------
 

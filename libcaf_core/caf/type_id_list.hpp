@@ -82,7 +82,7 @@ public:
   size_t data_size() const noexcept;
 
   /// Concatenates all `lists` into a single type ID list.
-  static type_id_list concat(span<type_id_list> lists);
+  CAF_CORE_EXPORT static type_id_list concat(span<type_id_list> lists);
 
   /// Concatenates all `lists` into a single type ID list.
   template <class... Ts>
