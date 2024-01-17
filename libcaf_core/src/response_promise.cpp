@@ -167,10 +167,14 @@ void response_promise::state::cancel() {
 void response_promise::state::deliver_impl(message msg) {
   CAF_LOG_TRACE(CAF_ARG(msg));
   auto cancel_guard = detail::make_scope_guard([this] {
-      cancel();
-      });
+    cancel();
+  });
   if (msg.empty() && id.is_async()) {
     CAF_LOG_DEBUG("drop response: empty response to asynchronous input");
+    return;
+  }
+  if (source == nullptr) {
+    CAF_LOG_DEBUG("drop response: source is nullptr");
     return;
   }
   auto self = weak_self.lock();
@@ -181,7 +185,7 @@ void response_promise::state::deliver_impl(message msg) {
     source->enqueue(std::move(element), nullptr);
     return;
   }
-  auto local_self = static_cast<local_actor*>(weak_self.get()->get());
+  auto local_self = static_cast<local_actor*>(self->get());
   if (!stages.empty()) {
     auto next = std::move(stages.back());
     stages.pop_back();
@@ -189,7 +193,6 @@ void response_promise::state::deliver_impl(message msg) {
                           local_self->context(), std::move(msg));
     return;
   } 
-  CAF_ASSERT(source != nullptr);
   detail::profiled_send(local_self, local_self->ctrl(), source, id.response_id(),
                         forwarding_stack{}, local_self->context(), std::move(msg));
 }
