@@ -166,22 +166,35 @@ void response_promise::state::cancel() {
 
 void response_promise::state::deliver_impl(message msg) {
   CAF_LOG_TRACE(CAF_ARG(msg));
-  // Even though we are holding a weak pointer, we can access the pointer
-  // without any additional check here because only the actor itself is allowed
-  // to call this function.
-  auto self = static_cast<local_actor*>(weak_self.get()->get());
+  auto cancel_guard = detail::make_scope_guard([this] {
+    cancel();
+  });
   if (msg.empty() && id.is_async()) {
     CAF_LOG_DEBUG("drop response: empty response to asynchronous input");
-  } else if (!stages.empty()) {
+    return;
+  }
+  if (source == nullptr) {
+    CAF_LOG_DEBUG("drop response: source is nullptr");
+    return;
+  }
+  auto self = weak_self.lock();
+  if (self == nullptr) {
+    auto element = make_mailbox_element(self, id.response_id(),
+                                        std::move(stages),
+                                        std::move(msg));
+    source->enqueue(std::move(element), nullptr);
+    return;
+  }
+  auto local_self = static_cast<local_actor*>(self->get());
+  if (!stages.empty()) {
     auto next = std::move(stages.back());
     stages.pop_back();
-    detail::profiled_send(self, std::move(source), next, id, std::move(stages),
-                          self->context(), std::move(msg));
-  } else if (source != nullptr) {
-    detail::profiled_send(self, self->ctrl(), source, id.response_id(),
-                          forwarding_stack{}, self->context(), std::move(msg));
-  }
-  cancel();
+    detail::profiled_send(local_self, std::move(source), next, id, std::move(stages),
+                          local_self->context(), std::move(msg));
+    return;
+  } 
+  detail::profiled_send(local_self, local_self->ctrl(), source, id.response_id(),
+                        forwarding_stack{}, local_self->context(), std::move(msg));
 }
 
 void response_promise::state::delegate_impl(abstract_actor* receiver,
