@@ -18,7 +18,6 @@ size_t print_timestamp(char* buf, size_t buf_size, time_t ts, size_t ms) {
   auto pos = strftime(buf, buf_size, "%FT%T", &time_buf);
   buf[pos++] = '.';
   if (ms > 0) {
-    CAF_ASSERT(ms < 1000);
     buf[pos++] = static_cast<char>((ms / 100) + '0');
     buf[pos++] = static_cast<char>(((ms % 100) / 10) + '0');
     buf[pos++] = static_cast<char>((ms % 10) + '0');
