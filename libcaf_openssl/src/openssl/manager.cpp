@@ -148,7 +148,9 @@ void manager::add_module_options(actor_system_config& cfg) {
       "path to an OpenSSL-style directory of trusted certificates")
     .add<std::string>(
       cfg.openssl_cafile, "cafile",
-      "path to a file of concatenated PEM-formatted certificates");
+      "path to a file of concatenated PEM-formatted certificates")
+    .add<bool>(cfg.hostname_validation, "enable-hostname-validation",
+      "explicitly toggle hostname validation on outgoing connections");
 }
 
 actor_system::module* manager::make(actor_system& sys, detail::type_list<>) {

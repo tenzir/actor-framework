@@ -170,6 +170,7 @@ settings actor_system_config::dump_content() const {
   put_missing(openssl_group, "passphrase", std::string{});
   put_missing(openssl_group, "capath", std::string{});
   put_missing(openssl_group, "cafile", std::string{});
+  put_missing(openssl_group, "hostname-validation", true);
   return result;
 }
 

@@ -41,7 +41,7 @@ public:
   rw_state read_some(size_t& result, native_socket fd, void* buf, size_t len);
   rw_state
   write_some(size_t& result, native_socket fd, const void* buf, size_t len);
-  bool try_connect(native_socket fd);
+  bool try_connect(native_socket fd, const std::string& sni_servername);
   bool try_accept(native_socket fd);
 
   bool must_read_more(native_socket, size_t threshold);
@@ -61,6 +61,7 @@ private:
   std::string openssl_passphrase_;
   bool connecting_;
   bool accepting_;
+  bool hostname_validation_;
 };
 
 /// @relates session
@@ -68,6 +69,7 @@ using session_ptr = std::unique_ptr<session>;
 
 /// @relates session
 CAF_OPENSSL_EXPORT session_ptr make_session(actor_system& sys, native_socket fd,
+                                            const std::string& servername,
                                             bool from_accepted_socket);
 
 } // namespace caf::openssl

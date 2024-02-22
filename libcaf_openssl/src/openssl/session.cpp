@@ -4,8 +4,11 @@
 
 #include "caf/openssl/session.hpp"
 
+#include <optional>
+
 CAF_PUSH_WARNINGS
 #include <openssl/err.h>
+#include <openssl/x509v3.h>
 CAF_POP_WARNINGS
 
 #include "caf/actor_system_config.hpp"
@@ -55,6 +58,58 @@ int pem_passwd_cb(char* buf, int size, int, void* ptr) {
   buf[size - 1] = '\0';
   return static_cast<int>(strlen(buf));
 }
+
+std::optional<std::string> contents_from_direct_envvar(const std::string& str) {
+  return str;
+}
+
+// If the input is a string like `env:SOME_VARIABLE` and the environment variable
+// `SOME_VARIABLE` exists, returns a string with the value of `SOME_VARIABLE`.
+// Otherwise, returns `std::nullopt`.
+std::optional<std::string> contents_from_indirect_envvar(const std::string& str) {
+  if (str.find("env:") != 0)
+    return std::nullopt;
+  auto var = str.substr(4);
+  auto const* contents = ::getenv(var.c_str());
+  if (contents == nullptr)
+    return std::nullopt;
+  return std::string{contents};
+}
+
+// If the input is a string like `env:SOME_VARIABLE` and the environment variable
+// `SOME_VARIABLE` exists, returns a string with the value of `SOME_VARIABLE`.
+std::optional<std::string> tmpfile_from_string(const std::string& content) {
+  const char* base = ::getenv("TMPDIR");
+  if (!base)
+    base = "/tmp";
+  auto filename = base + std::string{"/caf-openssl.XXXXXX"};
+  ::mkstemp(&filename[0]);
+  std::ofstream ofs(filename);
+  ofs << content;
+  ofs.close();
+  return filename;
+}
+
+// Returns a string in PEM format, ie. base64-encoded data surrounded
+// by `-----BEGIN XXX` and `-----END XXX` blocks.
+std::optional<std::string> pem_from_envvar(const std::string& str) {
+  if (str.find("env:") == 0)
+    return contents_from_indirect_envvar(str);
+  // The PEM format isn't very strictly defined, some implementations
+  // write the header as `---- BEGIN`. However, we probably don't want to
+  // keep supporting this in the long run anyways, so we're fine with just
+  // detecting exactly those certificates that we create ourselves.
+  if (str.find("-----BEGIN") == 0)
+    return contents_from_direct_envvar(str);
+  return std::nullopt;
+}
+
+std::optional<std::string> pem_file_from_envvar(const std::string& str) {
+  if (auto contents = pem_from_envvar(str))
+    return tmpfile_from_string(*contents);
+  return std::nullopt;
+}
+
 
 } // namespace
 
@@ -154,11 +209,22 @@ rw_state session::write_some(size_t& result, native_socket, const void* buf,
   return do_some(wr_fun, result, const_cast<void*>(buf), len, "write_some");
 }
 
-bool session::try_connect(native_socket fd) {
+bool session::try_connect(native_socket fd, const std::string& sni_servername) {
   CAF_LOG_TRACE(CAF_ARG(fd));
   CAF_BLOCK_SIGPIPE();
   SSL_set_fd(ssl_, fd);
   SSL_set_connect_state(ssl_);
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+  // Enable hostname validation.
+  if (hostname_validation_) {
+    SSL_set_hostflags(ssl_, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+    if (SSL_set1_host(ssl_, sni_servername.c_str()) != 1)
+      return false;
+  }
+#endif
+  // Send SNI when connecting.
+  if (SSL_set_tlsext_host_name(ssl_, sni_servername.c_str()) != 1)
+    return false;
   auto ret = SSL_connect(ssl_);
   if (ret == 1)
     return true;
@@ -198,25 +264,49 @@ SSL_CTX* session::create_ssl_context() {
   if (sys_.openssl_manager().authentication_enabled()) {
     // Require valid certificates on both sides.
     auto& cfg = sys_.config();
-    if (!cfg.openssl_certificate.empty()
+    enable_hostname_validation_ = cfg.enable_hostname_validation;
+    // OpenSSL doesn't expose an API to read a certificate chain PEM from
+    // memory and the implementation of `SSL_CTX_use_certificate_chain_file`
+    // is huge, so instead of reproducing that we write into a temporary file.
+    if (auto filename = pem_file_from_envvar(cfg.openssl_certificate)) {
+      if (SSL_CTX_use_certificate_chain_file(ctx, filename->c_str())
+             != 1)
+        CAF_RAISE_ERROR("cannot load certificate from environment variable");
+    } else if (!cfg.openssl_certificate.empty()
         && SSL_CTX_use_certificate_chain_file(ctx,
                                               cfg.openssl_certificate.c_str())
-             != 1)
+             != 1) {
       CAF_RAISE_ERROR("cannot load certificate");
+    }
     if (!cfg.openssl_passphrase.empty()) {
       openssl_passphrase_ = cfg.openssl_passphrase;
       SSL_CTX_set_default_passwd_cb(ctx, pem_passwd_cb);
       SSL_CTX_set_default_passwd_cb_userdata(ctx, this);
     }
-    if (!cfg.openssl_key.empty()
-        && SSL_CTX_use_PrivateKey_file(ctx, cfg.openssl_key.c_str(),
-                                       SSL_FILETYPE_PEM)
-             != 1)
+    if (auto var = pem_from_envvar(cfg.openssl_key)) {
+      // BIO_new_mem_buf just creates a read-only view, so we don't need
+      // to free it afterwards.
+      auto* kbio = BIO_new_mem_buf(var->data(), -1);
+      if (kbio == nullptr)
+        CAF_RAISE_ERROR("failed to construct OpenSSL BIO");
+      // Starting from OpenSSL 3.0, the OSSL_DECODER API is the suggested
+      // alternative for this.
+      // TODO: Pass the pem_passwd_cb here if a passphrase was configured.
+      auto* pkey = PEM_read_bio_PrivateKey(kbio, nullptr, nullptr, nullptr);
+      if (pkey == nullptr)
+        CAF_RAISE_ERROR("invalid private key");
+      SSL_CTX_use_PrivateKey(ctx, pkey);
+    } else if (!cfg.openssl_key.empty()
+               && SSL_CTX_use_PrivateKey_file(ctx, cfg.openssl_key.c_str(),
+                                              SSL_FILETYPE_PEM) != 1)
       CAF_RAISE_ERROR("cannot load private key");
     auto cafile = (!cfg.openssl_cafile.empty() ? cfg.openssl_cafile.c_str()
                                                : nullptr);
     auto capath = (!cfg.openssl_capath.empty() ? cfg.openssl_capath.c_str()
                                                : nullptr);
+    auto tmpfile = pem_file_from_envvar(cafile);
+    if (tmpfile)
+      cafile = tmpfile->c_str();
     if (cafile || capath) {
       if (SSL_CTX_load_verify_locations(ctx, cafile, capath) != 1)
         CAF_RAISE_ERROR("cannot load trusted CA certificates");
@@ -285,6 +375,7 @@ bool session::handle_ssl_result(int ret) {
 }
 
 session_ptr make_session(actor_system& sys, native_socket fd,
+                         const std::string& servername,
                          bool from_accepted_socket) {
   session_ptr ptr{new session(sys)};
   if (!ptr->init())
@@ -293,7 +384,7 @@ session_ptr make_session(actor_system& sys, native_socket fd,
     if (!ptr->try_accept(fd))
       return nullptr;
   } else {
-    if (!ptr->try_connect(fd))
+    if (!ptr->try_connect(fd, servername))
       return nullptr;
   }
   return ptr;
