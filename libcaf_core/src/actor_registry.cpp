@@ -80,20 +80,29 @@ void actor_registry::erase(actor_id key) {
   }
 }
 
-size_t actor_registry::inc_running() {
-  return ++*system_.base_metrics().running_actors;
+size_t actor_registry::inc_running(actor_id key) {
+  std::unique_lock<std::mutex> guard(running_mtx_);
+  ++*system_.base_metrics().running_actors;
+  running_.emplace(key);
+  return running_.size();
 }
 
 size_t actor_registry::running() const {
-  return static_cast<size_t>(system_.base_metrics().running_actors->value());
+  std::unique_lock<std::mutex> guard(running_mtx_);
+  return running_.size();
 }
 
-size_t actor_registry::dec_running() {
-  size_t new_val = --*system_.base_metrics().running_actors;
-  if (new_val <= 1) {
-    std::unique_lock<std::mutex> guard(running_mtx_);
-    running_cv_.notify_all();
-  }
+const std::unordered_set<actor_id>& actor_registry::running_ids() const {
+  std::unique_lock<std::mutex> guard(running_mtx_);
+  return running_;
+}
+
+size_t actor_registry::dec_running(actor_id key) {
+  std::unique_lock<std::mutex> guard(running_mtx_);
+  --*system_.base_metrics().running_actors;
+  running_.erase(key);
+  size_t new_val = running_.size();
+  running_cv_.notify_all();
   return new_val;
 }
 
@@ -101,8 +110,8 @@ void actor_registry::await_running_count_equal(size_t expected) const {
   CAF_ASSERT(expected == 0 || expected == 1);
   CAF_LOG_TRACE(CAF_ARG(expected));
   std::unique_lock<std::mutex> guard{running_mtx_};
-  while (running() != expected) {
-    CAF_LOG_DEBUG(CAF_ARG(running()));
+  while (running_.size() != expected) {
+    CAF_LOG_DEBUG(CAF_ARG(running_.size()));
     running_cv_.wait(guard);
   }
 }

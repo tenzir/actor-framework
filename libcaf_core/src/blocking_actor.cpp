@@ -132,7 +132,7 @@ public:
     auto& sys = ctx->system();
     sys.release_private_thread(thread_);
     if (!hidden_) {
-      [[maybe_unused]] auto count = sys.registry().dec_running();
+      [[maybe_unused]] auto count = sys.registry().dec_running(self_->id());
       CAF_LOG_DEBUG("actor" << self_->id() << "decreased running count to"
                             << count);
     }
@@ -166,7 +166,7 @@ void blocking_actor::launch(execution_unit*, bool, bool hide) {
   // Note: must *not* call register_at_system() to stop actor cleanup from
   // decrementing the count before releasing the thread.
   if (!hide) {
-    [[maybe_unused]] auto count = sys.registry().inc_running();
+    [[maybe_unused]] auto count = sys.registry().inc_running(id());
     CAF_LOG_DEBUG("actor" << id() << "increased running count to" << count);
   }
   thread->resume(new blocking_actor_runner(this, thread, hide));

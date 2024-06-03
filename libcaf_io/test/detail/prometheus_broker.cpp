@@ -70,6 +70,7 @@ CAF_TEST(the prometheus broker responds to HTTP get requests) {
   string_view response{reinterpret_cast<char*>(response_buf.data()),
                        response_buf.size()};
   CHECK(starts_with(response, http_ok_header));
+  MESSAGE(response);
   CHECK(contains(response, "\ncaf_system_running_actors 2 "));
   if (detail::prometheus_broker::has_process_metrics()) {
     CHECK(contains(response, "\nprocess_cpu_seconds_total "));

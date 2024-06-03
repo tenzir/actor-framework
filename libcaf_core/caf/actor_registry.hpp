@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "caf/abstract_actor.hpp"
 #include "caf/actor.hpp"
@@ -53,18 +54,31 @@ public:
 
   /// Increases running-actors-count by one.
   /// @returns the increased count.
-  size_t inc_running();
+  size_t inc_running(actor_id key);
 
   /// Decreases running-actors-count by one.
   /// @returns the decreased count.
-  size_t dec_running();
+  size_t dec_running(actor_id key);
 
   /// Returns the number of currently running actors.
   size_t running() const;
 
-  /// Blocks the caller until running-actors-count becomes `expected`
-  /// (must be either 0 or 1).
+  /// Returns the the actor ids of all currently running actors.
+  const std::unordered_set<actor_id>& running_ids() const;
+
+  /// Blocks the caller until running-actors-count becomes `expected`..
   void await_running_count_equal(size_t expected) const;
+
+  /// Blocks the caller until running-actors-count becomes `expected`..
+  /// Invokes `cb` every time the set of running actors shrinks.
+  template <class CB>
+  void await_running_count_equal(size_t expected, CB&& cb) const {
+    std::unique_lock<std::mutex> guard{running_mtx_};
+    while (running_.size() != expected) {
+      running_cv_.wait(guard);
+      cb();
+    }
+  }
 
   /// Returns the actor associated with `key` or `invalid_actor`.
   template <class T = strong_actor_ptr>
@@ -112,6 +126,7 @@ private:
 
   mutable std::mutex running_mtx_;
   mutable std::condition_variable running_cv_;
+  std::unordered_set<actor_id> running_;
 
   mutable detail::shared_spinlock instances_mtx_;
   entries entries_;
