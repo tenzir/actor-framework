@@ -77,7 +77,14 @@ void actor_registry::erase(actor_id key) {
   }
 }
 
-size_t actor_registry::inc_running() {
+size_t actor_registry::inc_running(std::string_view name, actor_id key) {
+  std::unique_lock<std::mutex> guard(running_mtx_);
+  auto it = named_running_.find(name);
+  if (it == named_running_.end()) {
+    it = named_running_.emplace(std::string{name},
+                                internal_name_map::mapped_type{}).first;
+  }
+  it->second.emplace(key);
   return ++*system_.base_metrics().running_actors;
 }
 
@@ -85,13 +92,21 @@ size_t actor_registry::running() const {
   return static_cast<size_t>(system_.base_metrics().running_actors->value());
 }
 
-size_t actor_registry::dec_running() {
+size_t actor_registry::dec_running(std::string_view name, actor_id key) {
   size_t new_val = --*system_.base_metrics().running_actors;
+  std::unique_lock<std::mutex> guard(running_mtx_);
+  auto it = named_running_.find(name);
+  if (it != named_running_.end()) {
+    it->second.erase(key);
+  }
   if (new_val <= 1) {
-    std::unique_lock<std::mutex> guard(running_mtx_);
     running_cv_.notify_all();
   }
   return new_val;
+}
+
+const actor_registry::internal_name_map& actor_registry::named_running() const {
+  return named_running_;
 }
 
 void actor_registry::await_running_count_equal(size_t expected) const {

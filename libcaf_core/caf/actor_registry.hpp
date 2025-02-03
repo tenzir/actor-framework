@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace caf {
 
@@ -53,11 +54,11 @@ public:
 
   /// Increases running-actors-count by one.
   /// @returns the increased count.
-  size_t inc_running();
+  size_t inc_running(std::string_view name, actor_id id);
 
   /// Decreases running-actors-count by one.
   /// @returns the decreased count.
-  size_t dec_running();
+  size_t dec_running(std::string_view name, actor_id id);
 
   /// Returns the number of currently running actors.
   size_t running() const;
@@ -87,6 +88,21 @@ public:
 
   name_map named_actors() const;
 
+  struct string_hash
+  {
+      using hash_type = std::hash<std::string_view>;
+      using is_transparent = void;
+
+      std::size_t operator()(const char* str) const        { return hash_type{}(str); }
+      std::size_t operator()(std::string_view str) const   { return hash_type{}(str); }
+      std::size_t operator()(std::string const& str) const { return hash_type{}(str); }
+  };
+  using internal_name_map
+    = std::unordered_map<std::string, std::unordered_set<actor_id>, string_hash,
+                         std::equal_to<>>;
+
+  const internal_name_map& named_running() const;
+
 private:
   // Starts this component.
   void start();
@@ -112,6 +128,7 @@ private:
 
   mutable std::mutex running_mtx_;
   mutable std::condition_variable running_cv_;
+  internal_name_map named_running_;
 
   mutable std::shared_mutex instances_mtx_;
   entries entries_;
