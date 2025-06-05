@@ -41,8 +41,9 @@ public:
 
   // -- constants --------------------------------------------------------------
 
-  /// Default maximum size for incoming HTTP responses: 512KiB.
-  static constexpr uint32_t default_max_response_size = 512 * 1024;
+  /// Default maximum size for incoming HTTP responses: 2GiB.
+  static constexpr uint32_t default_max_response_size
+    = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
 
   // -- constructors, destructors, and assignment operators --------------------
 
