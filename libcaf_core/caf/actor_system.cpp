@@ -465,7 +465,12 @@ public:
     }
     // Make sure we have a clock.
     if (!clock) {
-      clock = std::make_unique<actor_clock_impl>(*parent);
+      auto& factory = cfg.get_clock_factory();
+      if (factory) {
+        clock = factory(*parent);
+      } else {
+        clock = std::make_unique<actor_clock_impl>(*parent);
+      }
     }
     // Make sure we have a scheduler up and running.
     if (!scheduler) {
