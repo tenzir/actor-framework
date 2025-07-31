@@ -531,7 +531,12 @@ public:
     }
     // Make sure we have a clock.
     if (!clock) {
-      clock = std::make_unique<detail::thread_safe_actor_clock>(*parent);
+      auto& factory = cfg.get_clock_factory();
+      if (factory) {
+        clock = factory(*parent);
+      } else {
+        clock = std::make_unique<detail::thread_safe_actor_clock>(*parent);
+      }
     }
     // Make sure we have a scheduler up and running.
     if (!scheduler) {

@@ -237,6 +237,12 @@ public:
   /// @private
   void print_content() const;
 
+  void set_clock_factory(
+    std::function<auto(actor_system&)->std::unique_ptr<actor_clock>> clock);
+
+  auto get_clock_factory() const
+    -> std::function<auto(actor_system&)->std::unique_ptr<actor_clock>>&;
+
 protected:
   config_option_set custom_options_;
 
