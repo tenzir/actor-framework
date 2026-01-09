@@ -265,7 +265,7 @@ void scheduled_actor::deref_resumable() const noexcept {
 }
 
 void scheduled_actor::resume(scheduler* sched, uint64_t event_id) {
-  CAF_PUSH_AID(id());
+  CAF_PUSH_AID_FROM_PTR(this);
   auto lg = log::core::trace("event-id = {}", event_id);
   if (event_id == resumable::dispose_event_id) {
     cleanup(make_error(exit_reason::user_shutdown), sched);

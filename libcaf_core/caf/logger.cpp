@@ -129,6 +129,9 @@ void render_fields_formatted(render_buffer& buf,
 // Stores the ID of the currently running actor.
 thread_local actor_id current_actor_id;
 
+// Stores a pointer to the currently running actor.
+thread_local abstract_actor* current_actor_ptr;
+
 // Stores a pointer to the system-wide logger.
 thread_local intrusive_ptr<logger> current_logger_ptr;
 
@@ -686,6 +689,14 @@ actor_id logger::thread_local_aid() {
 actor_id logger::thread_local_aid(actor_id aid) noexcept {
   std::swap(current_actor_id, aid);
   return aid;
+}
+
+abstract_actor* logger::thread_local_aptr() noexcept {
+  return current_actor_ptr;
+}
+
+abstract_actor* logger::thread_local_aptr(abstract_actor* aptr) noexcept {
+  return std::exchange(current_actor_ptr, aptr);
 }
 
 intrusive_ptr<logger> logger::make(actor_system& sys) {

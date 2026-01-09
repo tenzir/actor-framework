@@ -228,6 +228,13 @@ public:
   /// Associates an actor ID to the calling thread and returns the last value.
   static actor_id thread_local_aid(actor_id aid) noexcept;
 
+  /// Returns a pointer to the currently running actor, or nullptr otherwise.
+  static abstract_actor* thread_local_aptr() noexcept;
+
+  /// Associates an actor pointer to the current thread and returns the previous
+  /// pointer.
+  static abstract_actor* thread_local_aptr(abstract_actor* aptr) noexcept;
+
   /// Returns whether the logger is configured to accept input for given
   /// component and log level.
   virtual bool accepts(unsigned level, std::string_view component_name) = 0;
@@ -337,7 +344,7 @@ private:
     }                                                                          \
   } while (false)
 
-#define CAF_PUSH_AID(aarg)                                                     \
+#define CAF_PUSH_AID_IMPL(aarg)                                                \
   caf::actor_id CAF_PP_UNIFYN(caf_aid_tmp)                                     \
     = caf::logger::thread_local_aid(aarg);                                     \
   auto CAF_PP_UNIFYN(caf_aid_tmp_guard)                                        \
@@ -345,10 +352,23 @@ private:
         caf::logger::thread_local_aid(CAF_PP_UNIFYN(caf_aid_tmp));             \
       })
 
+#define CAF_PUSH_APTR(some_ptr)                                                \
+  caf::abstract_actor* const CAF_PP_UNIFYN(caf_aptr_tmp)                       \
+    = caf::logger::thread_local_aptr(some_ptr);                                \
+  const auto CAF_PP_UNIFYN(caf_aptr_tmp_guard)                                 \
+    = caf::detail::scope_guard([=]() noexcept {                                \
+        caf::logger::thread_local_aptr(CAF_PP_UNIFYN(caf_aptr_tmp));           \
+      })
+
+#define CAF_PUSH_AID(aarg)                                                     \
+  CAF_PUSH_APTR(nullptr);                                                      \
+  CAF_PUSH_AID_IMPL(aarg)
+
 #define CAF_PUSH_AID_FROM_PTR(some_ptr)                                        \
   auto CAF_PP_UNIFYN(caf_aid_ptr) = some_ptr;                                  \
-  CAF_PUSH_AID(CAF_PP_UNIFYN(caf_aid_ptr) ? CAF_PP_UNIFYN(caf_aid_ptr)->id()   \
-                                          : 0)
+  CAF_PUSH_APTR(some_ptr);                                                     \
+  CAF_PUSH_AID_IMPL(                                                           \
+    CAF_PP_UNIFYN(caf_aid_ptr) ? CAF_PP_UNIFYN(caf_aid_ptr)->id() : 0)
 
 #define CAF_SET_AID(aid_arg) caf::logger::thread_local_aid(aid_arg)
 
