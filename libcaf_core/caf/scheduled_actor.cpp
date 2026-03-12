@@ -324,6 +324,10 @@ void scheduled_actor::resume(scheduler* sched, uint64_t event_id) {
   // time's up
   log::core::debug("max throughput reached: resume later");
   intrusive_ptr_add_ref(ctrl());
+  if (private_thread_ != nullptr) {
+    private_thread_->resume(this);
+    return;
+  }
   sched->delay(this, resumable::default_event_id);
 }
 
