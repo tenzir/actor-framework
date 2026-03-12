@@ -19,6 +19,9 @@
 #include "caf/send.hpp"
 #include "caf/thread_owner.hpp"
 
+#include <fmt/format.h>
+#include <pthread.h>
+
 #include <condition_variable>
 #include <fstream>
 #include <ios>
@@ -205,8 +208,35 @@ private:
     // scheduling loop
     for (;;) {
       auto job = policy_dequeue(parent);
+      char tname[64] = {};
+      pthread_getname_np(pthread_self(), tname, sizeof(tname));
+      auto* actor = dynamic_cast<scheduled_actor*>(job);
+      if (actor) {
+        fmt::println(stderr,
+                     "[caf] worker::run: worker_id={} thread='{}' job={} "
+                     "actor id={} name='{}' pinned_sched={}",
+                     id_, tname, fmt::ptr(job), actor->id(), actor->name(),
+                     fmt::ptr(job->pinned_scheduler()));
+      } else {
+        fmt::println(stderr,
+                     "[caf] worker::run: worker_id={} thread='{}' job={} "
+                     "non-actor pinned_sched={}",
+                     id_, tname, fmt::ptr(job),
+                     fmt::ptr(job->pinned_scheduler()));
+      }
       CAF_ASSERT(job->pinned_scheduler() == nullptr);
       job->resume(this, resumable::default_event_id);
+      if (actor) {
+        fmt::println(stderr,
+                     "[caf] worker::run: worker_id={} thread='{}' resumed "
+                     "actor id={} name='{}' job={}",
+                     id_, tname, actor->id(), actor->name(), fmt::ptr(job));
+      } else {
+        fmt::println(stderr,
+                     "[caf] worker::run: worker_id={} thread='{}' resumed "
+                     "non-actor job={}",
+                     id_, tname, fmt::ptr(job));
+      }
       intrusive_ptr_release(job);
       if (stop_worker)
         return;

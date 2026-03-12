@@ -12,6 +12,9 @@
 #include "caf/resumable.hpp"
 #include "caf/thread_owner.hpp"
 
+#include <fmt/format.h>
+#include <pthread.h>
+
 namespace caf::detail {
 
 void private_thread::run(actor_system* sys) {
@@ -19,8 +22,14 @@ void private_thread::run(actor_system* sys) {
   for (;;) {
     auto [job, done] = await();
     if (job) {
+      char tname[64] = {};
+      pthread_getname_np(pthread_self(), tname, sizeof(tname));
+      fmt::println(stderr, "[caf] private_thread::run: thread='{}' "
+                   "resuming job ptr={}", tname, fmt::ptr(job));
       CAF_ASSERT(job->pinned_scheduler() == nullptr);
       job->resume(&sys->scheduler(), resumable::default_event_id);
+      fmt::println(stderr, "[caf] private_thread::run: thread='{}' "
+                   "job done ptr={}", tname, fmt::ptr(job));
       intrusive_ptr_release(job);
     }
     if (done) {
@@ -32,6 +41,11 @@ void private_thread::run(actor_system* sys) {
 void private_thread::resume(resumable* ptr) {
   std::unique_lock<std::mutex> guard{mtx_};
   CAF_ASSERT(job_ == nullptr);
+  char tname[64] = {};
+  pthread_getname_np(pthread_self(), tname, sizeof(tname));
+  fmt::println(stderr, "[caf] private_thread::resume: caller-thread='{}' "
+               "private_thread={} job={}",
+               tname, fmt::ptr(this), fmt::ptr(ptr));
   job_ = ptr;
   cv_.notify_all();
 }

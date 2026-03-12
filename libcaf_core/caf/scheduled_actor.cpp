@@ -28,6 +28,9 @@
 #include "caf/stream.hpp"
 #include "caf/telemetry/metric_family_impl.hpp"
 
+#include <fmt/format.h>
+#include <pthread.h>
+
 using namespace std::string_literals;
 
 namespace caf {
@@ -177,6 +180,8 @@ bool scheduled_actor::enqueue(mailbox_element_ptr ptr, scheduler* sched) {
   CAF_LOG_SEND_EVENT(ptr);
   auto mid = ptr->mid;
   auto sender = ptr->sender;
+  char tname[64] = {};
+  pthread_getname_np(pthread_self(), tname, sizeof(tname));
   if (auto* mailbox_size = metrics_.mailbox_size) {
     ptr->set_enqueue_time();
     mailbox_size->inc();
@@ -186,10 +191,25 @@ bool scheduled_actor::enqueue(mailbox_element_ptr ptr, scheduler* sched) {
       CAF_LOG_ACCEPT_EVENT(true);
       intrusive_ptr_add_ref(ctrl());
       if (private_thread_) {
+        fmt::println(stderr, "[caf] enqueue: actor id={} name='{}' "
+                     "thread='{}' sched={} use_delay={} private_thread={} "
+                     "unblocked_reader -> private_thread",
+                     id(), name(), tname, fmt::ptr(sched), use_delay,
+                     fmt::ptr(private_thread_));
         private_thread_->resume(this);
       } else if (use_delay) {
+        fmt::println(stderr, "[caf] enqueue: actor id={} name='{}' "
+                     "thread='{}' sched={} use_delay={} private_thread={} "
+                     "unblocked_reader -> sched->delay",
+                     id(), name(), tname, fmt::ptr(sched), use_delay,
+                     fmt::ptr(private_thread_));
         sched->delay(this, resumable::default_event_id);
       } else {
+        fmt::println(stderr, "[caf] enqueue: actor id={} name='{}' "
+                     "thread='{}' sched={} use_delay={} private_thread={} "
+                     "unblocked_reader -> sched->schedule",
+                     id(), name(), tname, fmt::ptr(sched), use_delay,
+                     fmt::ptr(private_thread_));
         sched->schedule(this, resumable::default_event_id);
       }
       return true;
@@ -230,11 +250,21 @@ void scheduled_actor::launch(scheduler* sched, bool lazy) {
   auto delay_first_scheduling = lazy && mailbox().try_block();
   if (getf(is_detached_flag)) {
     private_thread_ = system().acquire_private_thread();
+    fmt::println(stderr, "[caf] launch: actor id={} name='{}' is DETACHED, "
+                 "private_thread={}, delay_first={}",
+                 id(), name(), fmt::ptr(private_thread_),
+                 delay_first_scheduling);
     if (!delay_first_scheduling) {
       intrusive_ptr_add_ref(ctrl());
+      fmt::println(stderr, "[caf] launch: actor id={} name='{}' "
+                   "initial private_thread->resume actor={} private_thread={}",
+                   id(), name(), fmt::ptr(this), fmt::ptr(private_thread_));
       private_thread_->resume(this);
     }
   } else if (!delay_first_scheduling) {
+    fmt::println(stderr, "[caf] launch: actor id={} name='{}' is NOT detached, "
+                 "scheduling on pool",
+                 id(), name());
     intrusive_ptr_add_ref(ctrl());
     sched->delay(this, resumable::initialization_event_id);
   }
@@ -268,6 +298,16 @@ void scheduled_actor::deref_resumable() const noexcept {
 void scheduled_actor::resume(scheduler* sched, uint64_t event_id) {
   detail::current_actor_guard ctx_guard{this};
   auto lg = log::core::trace("event-id = {}", event_id);
+  char tname[64] = {};
+  pthread_getname_np(pthread_self(), tname, sizeof(tname));
+  fmt::println(stderr,
+               "[caf] resume: actor id={} name='{}' thread='{}' actor={} "
+               "sched={} system_sched={} detached={} private_thread={} "
+               "event_id={} mailbox_blocked={} max_throughput={}",
+               id(), name(), tname, fmt::ptr(this), fmt::ptr(sched),
+               sched ? sched->is_system_scheduler() : false,
+               getf(is_detached_flag), fmt::ptr(private_thread_), event_id,
+               mailbox().blocked(), max_throughput_);
   if (event_id == resumable::dispose_event_id) {
     cleanup(make_error(exit_reason::user_shutdown), sched);
     return;
@@ -325,9 +365,21 @@ void scheduled_actor::resume(scheduler* sched, uint64_t event_id) {
   log::core::debug("max throughput reached: resume later");
   intrusive_ptr_add_ref(ctrl());
   if (private_thread_ != nullptr) {
+    fmt::println(stderr,
+                 "[caf] resume: actor id={} name='{}' thread='{}' actor={} "
+                 "sched={} system_sched={} -> private_thread->resume "
+                 "private_thread={}",
+                 id(), name(), tname, fmt::ptr(this), fmt::ptr(sched),
+                 sched ? sched->is_system_scheduler() : false,
+                 fmt::ptr(private_thread_));
     private_thread_->resume(this);
     return;
   }
+  fmt::println(stderr,
+               "[caf] resume: actor id={} name='{}' thread='{}' actor={} "
+               "sched={} system_sched={} -> sched->delay(default_event_id)",
+               id(), name(), tname, fmt::ptr(this), fmt::ptr(sched),
+               sched ? sched->is_system_scheduler() : false);
   sched->delay(this, resumable::default_event_id);
 }
 
