@@ -73,9 +73,11 @@ void local_actor::demonitor(const node_id& node) {
 }
 
 void local_actor::do_monitor(abstract_actor* ptr, message_priority priority) {
-  if (ptr != nullptr)
+  if (ptr != nullptr) {
     ptr->attach(
       default_attachable::make_monitor(ptr->address(), address(), priority));
+    monitored_actors_.emplace_back(ptr->ctrl(), add_ref);
+  }
 }
 
 void local_actor::do_demonitor(const strong_actor_ptr& whom) {
@@ -137,6 +139,10 @@ void local_actor::on_cleanup([[maybe_unused]] const error& reason) {
   if (auto* running_count = metrics_.running_count) {
     running_count->dec();
   }
+  for (auto& weak : monitored_actors_)
+    if (auto ptr = weak.lock())
+      do_demonitor(ptr);
+  monitored_actors_.clear();
   on_exit();
   CAF_LOG_TERMINATE_EVENT(this, reason);
 }

@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace caf {
 
@@ -381,6 +382,10 @@ protected:
 
   /// Stores the metrics for this actor.
   telemetry::actor_metrics metrics_;
+
+  /// Tracks actors monitored via the non-callback monitor() API so they can
+  /// be demonitored automatically when this actor exits.
+  std::vector<weak_actor_ptr> monitored_actors_;
 
 private:
   virtual void do_unstash(mailbox_element_ptr ptr) = 0;
