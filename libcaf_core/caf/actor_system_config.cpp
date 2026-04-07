@@ -4,6 +4,7 @@
 
 #include "caf/actor_system_config.hpp"
 
+#include "caf/actor_clock.hpp"
 #include "caf/config.hpp"
 #include "caf/config_option.hpp"
 #include "caf/config_option_adder.hpp"
@@ -101,6 +102,8 @@ struct actor_system_config::fields {
   exception_handler_type exception_handler
     = scheduled_actor::default_exception_handler;
 #endif // CAF_ENABLE_EXCEPTIONS
+  std::function<auto(actor_system&)->std::unique_ptr<actor_clock>>
+    clock_factory;
 };
 
 // -- constructors, destructors, and assignment operators ----------------------
@@ -617,6 +620,16 @@ void actor_system_config::print_content() const {
   config_printer printer;
   printer(dump_content());
   std::cout << std::endl;
+}
+
+void actor_system_config::set_clock_factory(
+  std::function<auto(actor_system&)->std::unique_ptr<actor_clock>> clock) {
+  fields_->clock_factory = std::move(clock);
+}
+
+auto actor_system_config::get_clock_factory() const
+  -> std::function<auto(actor_system&)->std::unique_ptr<actor_clock>>& {
+  return fields_->clock_factory;
 }
 
 // -- module factories ---------------------------------------------------------

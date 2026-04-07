@@ -11,6 +11,7 @@
 #include "caf/config.hpp"
 #include "caf/defaults.hpp"
 #include "caf/detail/assert.hpp"
+#include "caf/detail/monitor_attachable.hpp"
 #include "caf/detail/critical.hpp"
 #include "caf/detail/current_actor.hpp"
 #include "caf/detail/default_invoke_result_visitor.hpp"
@@ -29,6 +30,51 @@
 #include "caf/telemetry/metric_family_impl.hpp"
 
 using namespace std::string_literals;
+
+namespace {
+
+/// Disposable returned from do_monitor. Calling dispose() both cancels the
+/// monitor_action and removes its monitor_attachable from the monitored actor,
+/// so the monitored actor's attachable list never accumulates stale entries.
+class monitor_disposable_impl : public caf::ref_counted,
+                                public caf::disposable::impl {
+public:
+  monitor_disposable_impl(caf::detail::abstract_monitor_action_ptr on_down,
+                          caf::weak_actor_ptr monitored)
+    : on_down_(std::move(on_down)), monitored_(std::move(monitored)) {}
+
+  void dispose() override {
+    on_down_->dispose();
+    if (auto ptr = monitored_.lock())
+      ptr->get()->detach(caf::detail::monitor_token{on_down_.get()});
+  }
+
+  bool disposed() const noexcept override {
+    return on_down_->disposed();
+  }
+
+  void ref_disposable() const noexcept override {
+    ref();
+  }
+
+  void deref_disposable() const noexcept override {
+    deref();
+  }
+
+  friend void intrusive_ptr_add_ref(const monitor_disposable_impl* p) noexcept {
+    p->ref();
+  }
+
+  friend void intrusive_ptr_release(const monitor_disposable_impl* p) noexcept {
+    p->deref();
+  }
+
+private:
+  caf::detail::abstract_monitor_action_ptr on_down_;
+  caf::weak_actor_ptr monitored_;
+};
+
+} // namespace
 
 namespace caf {
 
@@ -246,6 +292,11 @@ void scheduled_actor::on_cleanup(const error& reason) {
   // Shutdown hosting thread when running detached.
   if (private_thread_)
     home_system().release_private_thread(private_thread_);
+  // Cancel any monitors this actor set up to avoid leaving stale attachables
+  // in the monitored actors' lists.
+  for (auto& d : active_monitors_)
+    d.dispose();
+  active_monitors_.clear();
   // Clear state for open requests, flows and streams.
   awaited_responses_.clear();
   multiplexed_responses_.clear();
@@ -324,6 +375,10 @@ void scheduled_actor::resume(scheduler* sched, uint64_t event_id) {
   // time's up
   log::core::debug("max throughput reached: resume later");
   intrusive_ptr_add_ref(ctrl());
+  if (private_thread_ != nullptr) {
+    private_thread_->resume(this);
+    return;
+  }
   sched->delay(this, resumable::default_event_id);
 }
 
@@ -1135,6 +1190,7 @@ void scheduled_actor::update_watched_disposables() {
     log::core::debug("now watching {} disposables",
                      watched_disposables_.size());
   }
+  disposable::erase_disposed(active_monitors_);
 }
 
 void scheduled_actor::register_flow_state(uint64_t local_id,
@@ -1215,16 +1271,13 @@ scheduled_actor::do_monitor(abstract_actor* ptr,
                             detail::abstract_monitor_action_ptr on_down) {
   if (ptr == nullptr)
     return {};
-  ptr->attach_functor([self = address(), on_down](error reason) {
-    // Failing to set the arg means the action was disposed.
-    if (on_down->set_reason(std::move(reason))) {
-      if (auto shdl = actor_cast<actor>(self))
-        shdl->enqueue(make_mailbox_element(nullptr, make_message_id(),
-                                           action{on_down}),
-                      nullptr);
-    }
-  });
-  return on_down->as_disposable();
+  ptr->attach(attachable_ptr{
+    new detail::monitor_attachable(on_down, address())});
+  auto d = disposable{
+    make_counted<monitor_disposable_impl>(on_down,
+                                         actor_cast<weak_actor_ptr>(ptr))};
+  active_monitors_.push_back(d);
+  return d;
 }
 
 } // namespace caf

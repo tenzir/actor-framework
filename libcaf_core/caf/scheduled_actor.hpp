@@ -854,6 +854,11 @@ private:
   /// terminating.
   std::vector<disposable> watched_disposables_;
 
+  /// Stores disposables for active monitors set up by this actor. Disposed
+  /// automatically in on_cleanup() so stale entries never accumulate on the
+  /// monitored actors' attachable lists.
+  std::vector<disposable> active_monitors_;
+
   /// Stores open streams that other actors may access. An actor is considered
   /// alive as long as it has open streams.
   std::unordered_map<uint64_t, stream_source_state> stream_sources_;

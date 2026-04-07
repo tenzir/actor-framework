@@ -35,6 +35,9 @@ public:
     /// Identifies `default_attachable::observe_token`.
     static constexpr size_t observer = 2;
 
+    /// Identifies `detail::monitor_token`.
+    static constexpr size_t monitor = 3;
+
     template <class T>
     token(const T& tk) : subtype(T::token_type), ptr(&tk) {
       // nop
