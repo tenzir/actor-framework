@@ -5,6 +5,7 @@
 #include "caf/attachable.hpp"
 
 #include "caf/abstract_actor.hpp"
+#include "caf/add_ref.hpp"
 #include "caf/actor_cast.hpp"
 #include "caf/detail/monitor_action.hpp"
 #include "caf/internal/attachable_factory.hpp"
@@ -24,9 +25,11 @@ public:
   void actor_exited(abstract_actor* self, const error& rsn,
                     scheduler* sched) override {
     if (auto sptr = actor_cast<strong_actor_ptr>(observer)) {
-      sptr->enqueue(make_mailbox_element(nullptr, make_message_id(priority),
-                                         down_msg{self->address(), rsn}),
-                    sched);
+      sptr->enqueue(
+        make_mailbox_element(strong_actor_ptr{self->ctrl(), add_ref},
+                             make_message_id(priority),
+                             down_msg{self->address(), rsn}),
+        sched);
     }
   }
 
@@ -89,9 +92,11 @@ public:
   void actor_exited(abstract_actor* self, const error& reason,
                     scheduler* sched) override {
     if (auto sptr = actor_cast<strong_actor_ptr>(observer)) {
-      sptr->enqueue(make_mailbox_element(nullptr, make_message_id(),
-                                         exit_msg{self->address(), reason}),
-                    sched);
+      sptr->enqueue(
+        make_mailbox_element(strong_actor_ptr{self->ctrl(), add_ref},
+                             make_message_id(),
+                             exit_msg{self->address(), reason}),
+        sched);
     }
   }
 
